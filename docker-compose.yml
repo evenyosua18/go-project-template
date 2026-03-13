@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: go-project-template
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount config directory so you can edit config.toml on host
+      - ./config:/app/config
+      # Mount docs so swagger.json updates are reflected (optional if re-generated)
+      - ./docs:/app/docs
+    networks:
+      - shared-network
+
+networks:
+  shared-network:
+    external: true
+    # Run 'docker network create shared-network' if you haven't already
+    # Or change this to the name of your existing network where MySQL/Redis is running

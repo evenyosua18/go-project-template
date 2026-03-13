@@ -1,0 +1,6 @@
+codes:
+  - code: example_error_code
+    error: example error
+    message: example error message
+    http_code: 400
+    grpc_code: 3

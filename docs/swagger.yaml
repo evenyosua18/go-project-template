@@ -1,0 +1,13 @@
+info:
+  contact: {}
+  description: '{{ .ProjectName }} API documentation.'
+  title: '{{ .ProjectName }} API'
+  version: "1.0"
+paths: {}
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

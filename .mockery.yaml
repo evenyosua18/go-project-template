@@ -1,0 +1,15 @@
+#reference: https://vektra.github.io/mockery/latest/configuration/#parameter-descriptions
+
+dir: ./app/mocks/
+
+packages:
+  github.com/evenyosua18/go-project-template/app/repository/db/example:
+    interfaces:
+      IExampleRepository:
+        configs:
+          - filename: repository/db/example/example.go
+  github.com/evenyosua18/go-project-template/app/usecase/example:
+    interfaces:
+      IExampleUsecase:
+        configs:
+          - filename: usecase/example/example.go

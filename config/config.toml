@@ -1,0 +1,61 @@
+[service]
+name = "example-svc" # UPDATE ME
+env = "local"
+shutdown_timeout = "45s"
+
+[database]
+driver = ""
+name = ""
+host = ""
+port = ""
+password = ""
+protocol = ""
+user = ""
+params = ""
+max_open_conns = ""
+max_idle_conns = ""
+conn_max_lifetime = ""
+conn_max_idle_time = ""
+
+[code]
+filename = "codes.yml"
+
+[tracer]
+dsn = ""
+flush_time = ""
+sample_rate = ""
+
+[router]
+port = "8080"
+prefix = "ms/example"
+show_registered = "true"
+html_path = ""
+allow_origins = []
+allow_headers = ["Origin", "Content-Length", "Content-Type", "Authorization"]
+allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+doc_path = "docs/swagger.json"
+max_connection = 500
+disable_auth_checker = true
+
+[router.rate_limit]
+max_limit = 100
+
+[access_token]
+issuer = "123456"
+audience = ["user", "svc"]
+expire_duration = "24h"
+private_key = ""
+public_key = ""
+
+[refresh_token]
+expired_duration = "72h"
+length = 32
+
+[pagination]
+default_per_page = 10
+
+[logger]
+level = "debug"
+
+[cache]
+duration = ""

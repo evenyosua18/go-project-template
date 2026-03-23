@@ -10,22 +10,19 @@ Read `.agents/knowledges/unit_test.md` and `.agents/knowledges/architecture.md` 
 
 ## Workflow
 
-### 1 Scope & Dependency Analysis
+### 1. Scope & Dependency Analysis
 - Read each target source file fully to understand all code paths and edge cases
 - Identify every interface dependency that needs to be mocked (repository, service, third-party)
 - List all happy paths and unhappy paths (errors, validation failures, edge cases)
 
-### 2 Mock Generation
+### 2. Mock Generation
 For each interface dependency:
 - add mock configuration at `.mockery.yaml`
-- Run:
-  ```bash
-  mockery
-  ```
+- Run `mockery` to generate the mock
 - Verify generated file at `app/mocks/{source/path}/mock_{InterfaceName}.go`
 - Do not hand-write or edit generated mock files
 
-### 3 Test Implementation
+### 3. Test Implementation
 - Create test file alongside source: `{source_file}_test.go`
 - Use table-driven tests with struct shape: `[]struct{ name, mockSetup, args, want, wantErr }`
 - Naming: `Test{FunctionName}{Context}` — e.g., `TestInsertPaymentSuccess`, `TestInsertPaymentDBError`
@@ -36,7 +33,7 @@ For each interface dependency:
 - DB repository tests: use `go-sqlmock`; always `ExpectBegin` before queries
 - Third-party repository tests: use `httptest.NewServer`
 
-### 4 Coverage Verification
+### 4. Coverage Verification
 Run tests and confirm ≥ 90% coverage:
 ```bash
 make coverage TYPE={db|usecase|public|service|entity} FOLDER={related folder name}

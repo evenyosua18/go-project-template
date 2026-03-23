@@ -6,7 +6,7 @@ description: Execute the unit tester persona to write tests and generate mocks
 Apply after implementing a feature or fixing a bug, or when the user says "write tests", "add coverage", or "test this file/package".
 
 ## Knowledge
-Read `.agents/knowledges/unit_test.md` and `.agents/knowledges/architecture.md` §2.2.3 Mocks before writing any code.
+Read `.agents/knowledges/unit_test.md` and `.agents/knowledges/architecture.md` before writing any unit test.
 
 ## Workflow
 

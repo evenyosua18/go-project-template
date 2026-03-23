@@ -10,71 +10,147 @@
 
 ## 2. Database Unit Testing
 - This section applies to anything related to the database repository (e.g., `app/repository/db`).
-- Use `github.com/DATA-DOG/go-sqlmock` to mock the `sql` package.
+- Use `github.com/evenyosua18/ego/stub/sqldb` to stub the `sqldb` package.
+- Use `github.com/evenyosua18/ego/stub/tracer` to stub the `tracer` package.
 - Function naming convention: `Test<FunctionName><Context>`
-    - For example, if there is a `count.go` file with a `Count()` function in the `payments` directory, the test function should be named `TestCountPayments()`.
+    - For example, if there is a `get.go` file with a `Get()` function in the `access_tokens` directory, the test function should be named `TestRepositoryAccessToken_Get(t *testing.T)`.
 
 **Sample Implementation**
 ```go
-package payments
+package access_tokens
 
 import (
 	"context"
 	"database/sql"
-	"regexp"
+	"fmt"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/stretchr/testify/assert"
-	"github.com/tanookiai/go-core/apierror"
-	"github.com/tanookiai/go-core/db"
+	"github.com/evenyosua18/ego/sqldb"
+	"github.com/evenyosua18/ego/stub/clock"
+	stubsqldb "github.com/evenyosua18/ego/stub/sqldb"
+	stubtracer "github.com/evenyosua18/ego/stub/tracer"
+	"github.com/evenyosua18/ego/tracer"
 )
 
-func TestCountPayments(t *testing.T) {
-	dbSqlMock, mock, err := sqlmock.New()
-	assert.Nil(t, err)
-	dbConn := db.NewDBWithPool(dbSqlMock)
-	dbMock := db.NewSQLHelper()
-
-	mockCtx := context.TODO()
-
+func TestRepositoryAccessToken_Get(t *testing.T) {
+	// function request parameter
 	type args struct {
-		filter FilterPayment
+		ctx    context.Context
+		filter FilterAccessToken
 	}
+
+	filter := FilterAccessToken{
+		Id: sql.NullInt64{Valid: true, Int64: 1},
+	}
+	
+	query, qargs := filter.SelectStatement(filter)
+
+	expectedArgs := qargs
+
+	expectedResult := AccessToken{
+		Id:         1,
+		UserId:     sql.NullInt64{Valid: true, Int64: 1},
+		ClientId:   sql.NullString{Valid: true, String: "TEST"},
+		Scopes:     "TEST",
+		ExpiredAt:  clock.Stub(),
+		GrantType:  "TEST",
+		AccessType: "TEST",
+	}
+
+	expectedResultValues := []any{
+		expectedResult.Id,
+		expectedResult.UserId,
+		expectedResult.ClientId,
+		expectedResult.Scopes,
+		expectedResult.ExpiredAt,
+		expectedResult.GrantType,
+		expectedResult.AccessType,
+	}
+
 	tests := []struct {
-		name     string
-		mockCall func()
-		args     args
-		want     int64
-		wantErr  error
+		name    string
+		args    args
+		want    AccessToken
+		wantErr error
+		tracer  tracer.Tracer
+		db      sqldb.IDbManager
 	}{
 		{
-			name: "Success - Count all payments",
+			name: "success get access token",
+			db: &stubsqldb.StubDbManager{
+				StubExecutor: stubsqldb.StubExecutor{
+					ExpectedQuery: query,
+					ExpectedArgs:  expectedArgs,
+					QueryRowValues: expectedResultValues,
+				},
+			},
+			tracer: &stubtracer.StubTracer{},
 			args: args{
-				filter: FilterPayment{},
+				ctx:    context.TODO(),
+				filter: filter,
 			},
-			mockCall: func() {
-				mock.ExpectBegin()
-				rows := sqlmock.NewRows([]string{"count"}).AddRow(2)
-				mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(id) FROM payments WHERE deleted_at IS NULL")).WillReturnRows(rows)
-			},
-			want:    2,
+			want:    expectedResult,
 			wantErr: nil,
-		}
+		},
+		{
+			name: "executor error",
+			args: args{
+				ctx:    context.TODO(),
+				filter: filter,
+			},
+			want:    AccessToken{},
+			wantErr: fmt.Errorf(`TEST`),
+			tracer:  &stubtracer.StubTracer{},
+			db: &stubsqldb.StubDbManager{
+				ExecutorErr: fmt.Errorf(`TEST`),
+			},
+		},
+		{
+			name: "query row scan error",
+			args: args{
+				ctx:    context.TODO(),
+				filter: filter,
+			},
+			want:    AccessToken{},
+			wantErr: sql.ErrNoRows,
+			tracer:  &stubtracer.StubTracer{},
+			db: &stubsqldb.StubDbManager{
+				StubExecutor: stubsqldb.StubExecutor{
+					ExpectedQuery: query,
+					ExpectedArgs:  expectedArgs,
+					QueryRowErr: sql.ErrNoRows,
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.mockCall()
+			// set up repository
+			r := &RepositoryAccessToken{
+				tracer: tt.tracer,
+				db:     tt.db,
+			}
 
-			_, ctx := dbConn.BeginTrxWithContext(mockCtx)
-			r := &PaymentRepository{dbMock}
-			got, err := r.Count(ctx, tt.args.filter)
+			// get
+			got, err := r.Get(tt.args.ctx, tt.args.filter)
 
-			assert.EqualValues(t, tt.want, got)
-			assert.EqualValues(t, tt.wantErr, err)
+			// expected error
+			if tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("Get() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 
-			assert.NoError(t, mock.ExpectationsWereMet())
+			// expected value via simple struct comparison
+			if got.Id != tt.want.Id || got.ClientId != tt.want.ClientId || got.UserId != tt.want.UserId || got.Scopes != tt.want.Scopes || got.GrantType != tt.want.GrantType || got.AccessType != tt.want.AccessType {
+				t.Errorf("Get() got = %v, want %v", got, tt.want)
+			}
+            
+            // Checking the time to not get affected by precision matches issue
+            // We use simple Unix validation
+            if (!got.ExpiredAt.IsZero() || !tt.want.ExpiredAt.IsZero()) && got.ExpiredAt.Unix() != tt.want.ExpiredAt.Unix() {
+                t.Errorf("Get() time ExpiredAt got = %v, want %v", got.ExpiredAt, tt.want.ExpiredAt)
+            }
 		})
 	}
 }
@@ -82,320 +158,353 @@ func TestCountPayments(t *testing.T) {
 
 ## 3. Third party Unit Testing
 - This section applies to anything related to the third party repository (e.g., `app/repository`). `except db folder`
+- Third party can be microservice or external service
 
 ```go
-package credit
-
-import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-)
-
-func TestInjectPlatformCredit(t *testing.T) {
-	mockCtx := context.TODO()
-
-	type args struct {
-		req InjectPlatformCreditRequest
-	}
-	tests := []struct {
-		name            string
-		baseUrl         string
-		apiKey          string
-		mockServer      func() *httptest.Server
-		args            args
-		wantErr         bool
-		wantErrContains string
-		exactErr        error
-	}{
-		{
-			name:    "Success - Inject platform credit",
-			baseUrl: "mocked",
-			apiKey:  "test-api-key",
-			mockServer: func() *httptest.Server {
-				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(`{"success":true}`))
-				}))
-			},
-			args: args{
-				req: InjectPlatformCreditRequest{
-					AccountID:     1,
-					Amount:        1000,
-					Type:          "deposit",
-					ReferenceID:   123,
-					ReferenceType: "trx",
-				},
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var baseUrl string
-			if tt.mockServer != nil {
-				server := tt.mockServer()
-				if server != nil {
-					defer server.Close()
-					if tt.baseUrl == "mocked" {
-						baseUrl = server.URL
-					} else {
-						baseUrl = tt.baseUrl
-					}
-				} else {
-					baseUrl = tt.baseUrl
-				}
-			} else {
-				baseUrl = tt.baseUrl
-			}
-
-			repo := &CreditSvcCreditRepository{
-				baseUrl: baseUrl,
-				apiKey:  tt.apiKey,
-			}
-
-			err := repo.InjectPlatformCredit(mockCtx, tt.args.req)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.exactErr != nil {
-					assert.EqualValues(t, tt.exactErr, err)
-				}
-				if tt.wantErrContains != "" {
-					assert.Contains(t, err.Error(), tt.wantErrContains)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
 ```
 
-## 4. Service Layer Unit Testing
-- This section applies to anything under `app/service/`.
-- Inject repository mocks directly into the service struct (no constructor wrapper needed).
-- Use `mockSetup func()` (not `mockCall`) in the test table — this matches the service layer convention.
-- Call `mock.AssertExpectations(t)` for **every** mock at the end of each test case.
-- Override package-level function variables (e.g., `timeNow`) before the test table, restore them via `defer` if the value changes per test case.
-- Set Viper config values at the top of the test function when the service reads from config.
-- Use `apierror.Get("<code>").Message("<msg>")` for `wantErr` — match the exact error the service returns.
-- Function naming convention: `Test<ServiceStructName>_<MethodName>` — e.g., `TestPaymentService_Insert`.
+## 4. Usecase Layer Unit Testing
+- This section applies to anything under `app/usecase/`.
+- Inject repository mocks directly into the usecase struct (no constructor wrapper needed).
+- Set `config.SetTestConfig()` to stub config value
+- Use `codes.Get("<code>").Message("<msg>")` for `wantErr` — match the exact error the service returns.
+- Function naming convention: `Test<UsecaseStructName>_<MethodName>` — e.g., `TestUsecaseRefreshToken_GenerateRefreshToken`.
 
 **Sample Implementation**
 ```go
-package paymentsvc
+package refresh_token
 
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/tanookiai/go-core/apierror"
-	"github.com/tanookiai/payment-svc/entity"
-	mockPaymentRepo "github.com/tanookiai/payment-svc/mocks/repository/db/payments"
+	"github.com/evenyosua18/auth-svc/app/entity"
+	mockRefreshToken "github.com/evenyosua18/auth-svc/app/mocks/repository/db/refresh_tokens"
+	"github.com/evenyosua18/auth-svc/app/repository/db/refresh_tokens"
+	"github.com/evenyosua18/ego/config"
+	"github.com/evenyosua18/ego/cryptox"
+	"github.com/evenyosua18/ego/sqldb"
+	"github.com/evenyosua18/ego/stub"
+	"github.com/evenyosua18/ego/stub/clock"
+	stubdb "github.com/evenyosua18/ego/stub/sqldb"
+	stubtracer "github.com/evenyosua18/ego/stub/tracer"
+	"github.com/evenyosua18/ego/tracer"
 )
 
-func TestPaymentService_Insert(t *testing.T) {
-	mockPaymentRepo := new(mockPaymentRepo.IPaymentRepository)
-
-	mockCtx := context.TODO()
+func TestUsecaseRefreshToken_GenerateRefreshToken(t *testing.T) {
+	type fields struct {
+		tracer             tracer.Tracer
+		db                 sqldb.IDbManager
+		timeNow            stub.TimeNowFunc
+		generateRandString stub.GenerateRandomStringFunc
+	}
 
 	type args struct {
-		req entity.InsertPaymentRequest
+		ctx     context.Context
+		request entity.GenerateRefreshTokenRequest
 	}
+
+	refreshToken, hashedRefreshToken := cryptox.HashValue("TEST")
+
 	tests := []struct {
-		name      string
-		mockSetup func()
-		args      args
-		want      entity.InsertPaymentResponse
-		wantErr   error
+		name    string
+		fields  fields
+		args    args
+		want    entity.GenerateRefreshTokenResponse
+		wantErr error
+		mock    func(refreshTokenRepo refresh_tokens.IRefreshTokenRepository)
 	}{
 		{
-			name: "Success - Insert payment",
-			mockSetup: func() {
-				mockPaymentRepo.On("Insert", mockCtx, payments.InsertPayment{
-					AccountID: 1,
-					Amount:    10000,
-					Currency:  "idr",
-				}).Return(int64(1), nil).Once()
-			},
-			args: args{
-				req: entity.InsertPaymentRequest{
-					AccountID: 1,
-					Amount:    10000,
-					Currency:  "IDR",
+			name: "insert refresh token error",
+			fields: fields{
+				tracer: &stubtracer.StubTracer{},
+				db:     &stubdb.StubDbManager{},
+				timeNow: func() time.Time {
+					return clock.Stub()
+				},
+				generateRandString: func(length int) string {
+					return "TEST"
 				},
 			},
-			want:    entity.InsertPaymentResponse{ID: 1},
-			wantErr: nil,
+			args: args{
+				ctx: context.TODO(),
+				request: entity.GenerateRefreshTokenRequest{
+					AccessTokenId: 1,
+				},
+			},
+			want:    entity.GenerateRefreshTokenResponse{},
+			wantErr: codes.Get("0500").Message("failed to generate refresh token"),
+			mock: func(refreshTokenRepo refresh_tokens.IRefreshTokenRepository) {
+				// setup variable
+				ctx := context.TODO()
+
+				mockAuthUserRepo := refreshTokenRepo.(*mockRefreshToken.MockIRefreshTokenRepository)
+
+				// mock insert
+				mockAuthUserRepo.EXPECT().Insert(ctx, refresh_tokens.RefreshToken{
+					AccessTokenId: 1,
+					ExpiredAt:     clock.StubValue.Add(time.Hour),
+					RefreshToken:  hashedRefreshToken,
+					Attempts:      1,
+				}).Return(0, codes.Get("0500").Message("failed to generate refresh token")).Once()
+			},
 		},
 		{
-			name: "Error - Repository insert failed",
-			mockSetup: func() {
-				mockPaymentRepo.On("Insert", mockCtx, payments.InsertPayment{
-					AccountID: 1,
-					Amount:    10000,
-					Currency:  "idr",
-				}).Return(int64(0), errors.New("db error")).Once()
-			},
-			args: args{
-				req: entity.InsertPaymentRequest{
-					AccountID: 1,
-					Amount:    10000,
-					Currency:  "IDR",
+			name: "success generate refresh token",
+			fields: fields{
+				tracer: &stubtracer.StubTracer{},
+				db:     &stubdb.StubDbManager{},
+				timeNow: func() time.Time {
+					return clock.Stub()
+				},
+				generateRandString: func(length int) string {
+					return "TEST"
 				},
 			},
-			want:    entity.InsertPaymentResponse{},
-			wantErr: apierror.Get("0500").Message("failed to insert payment"),
+			args: args{
+				ctx: context.TODO(),
+				request: entity.GenerateRefreshTokenRequest{
+					AccessTokenId: 1,
+				},
+			},
+			want: entity.GenerateRefreshTokenResponse{
+				RefreshToken:   refreshToken,
+				RefreshTokenId: 1,
+			},
+			wantErr: nil,
+			mock: func(refreshTokenRepo refresh_tokens.IRefreshTokenRepository) {
+				// setup variable
+				ctx := context.TODO()
+
+				mockAuthUserRepo := refreshTokenRepo.(*mockRefreshToken.MockIRefreshTokenRepository)
+
+				// mock insert
+				mockAuthUserRepo.EXPECT().Insert(ctx, refresh_tokens.RefreshToken{
+					AccessTokenId: 1,
+					ExpiredAt:     clock.StubValue.Add(time.Hour),
+					RefreshToken:  hashedRefreshToken,
+					Attempts:      1,
+				}).Return(1, nil).Once()
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.mockSetup != nil {
-				tt.mockSetup()
+			// set test config
+			config.SetTestConfig(map[string]any{
+				"refresh_token.length":           5,
+				"refresh_token.expired_duration": "1h",
+			})
+
+			// set repo
+			refreshTokenRepo := mockRefreshToken.NewMockIRefreshTokenRepository(t)
+
+			u := &UsecaseRefreshToken{
+				tracer:           tt.fields.tracer,
+				db:               tt.fields.db,
+				refreshTokenRepo: refreshTokenRepo,
 			}
 
-			svc := PaymentService{
-				paymentRepo: mockPaymentRepo,
+			// set stub function
+			if tt.fields.timeNow != nil {
+				u.timeNow = tt.fields.timeNow
 			}
-			got, err := svc.Insert(mockCtx, tt.args.req)
 
-			assert.Equal(t, tt.wantErr, err)
-			assert.Equal(t, tt.want, got)
-			mockPaymentRepo.AssertExpectations(t)
+			if tt.fields.generateRandString != nil {
+				u.generateRandString = tt.fields.generateRandString
+			}
+
+			// run mock
+			if tt.mock != nil {
+				tt.mock(refreshTokenRepo)
+			}
+
+			got, err := u.GenerateRefreshToken(tt.args.ctx, tt.args.request)
+
+			// expected error
+			if tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("got an error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GenerateRefreshToken() got = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
 ```
 
 ## 5. API Layer Unit Testing
-- This section applies to anything under `app/api/`.
+- This section applies to anything under `app/server/rest`.
 - The API layer has **two distinct test types**:
-  1. **Service integration tests** — mock the service interface, call the service method directly (simulating what the handler does), assert response and error.
-  2. **Business logic tests** — no mocks; test pure handler logic (e.g., field derivation, fallback values) in isolation.
-- Use `setup func(*mock.IService)` in the test table to configure mock expectations per case.
-- Instantiate the mock with `mock.NewI<ServiceName>(t)` (generated by mockery) — this auto-registers cleanup.
-- Call `mockSvc.AssertExpectations(t)` at the end of each test case.
+  1. **Usecase integration tests** — mock the usecase interface, call the usecase method directly (simulating what the handler does), assert response and error.
 - For error assertions prefer `assert.EqualError(t, err, tt.wantErr.Error())` over `assert.Equal`.
-- Function naming convention:
-  - Service integration: `Test<ApiStruct>_<HandlerMethod>_ServiceLayer`
-  - Business logic: `Test<ApiStruct>_<LogicDescription>_Logic`
+- Function naming convention `Test<ApiStruct>_<HandlerMethod>_ServiceLayer`
 
 **Sample Implementation**
 ```go
-package paymentapi
+package access_token
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/evenyosua18/auth-svc/app/entity"
+	mockAccessTokenUc "github.com/evenyosua18/auth-svc/app/mocks/usecase/access_token"
+	"github.com/evenyosua18/ego/config"
+	"github.com/evenyosua18/ego/http"
+	stubtracer "github.com/evenyosua18/ego/stub/tracer"
+	"github.com/gofiber/fiber/v3"
 	"github.com/stretchr/testify/assert"
-	"github.com/tanookiai/go-core/apierror"
-	paymentsvcmock "github.com/tanookiai/payment-svc/mocks/service/paymentsvc"
-	"github.com/tanookiai/payment-svc/entity"
+	"github.com/stretchr/testify/mock"
 )
 
-// TestApiPayment_Insert_ServiceLayer tests the handler's service layer integration.
-// Full HTTP handler testing requires HTTP mock infrastructure; this test focuses on
-// verifying service call and response propagation.
-func TestApiPayment_Insert_ServiceLayer(t *testing.T) {
-	ctx := context.Background()
+func TestApiToken_RefreshToken(t *testing.T) {
+	config.SetTestConfig(map[string]any{})
 
+	type args struct {
+		body any // Can be string or a struct that will be marshaled into JSON
+	}
 	tests := []struct {
-		name    string
-		req     entity.InsertPaymentRequest
-		setup   func(*paymentsvcmock.IPaymentService)
-		want    entity.InsertPaymentResponse
-		wantErr error
+		name         string
+		args         args
+		wantCode     int
+		wantResponse *entity.TokenGenerationRefreshResponse
+		setupMock    func(uc *mockAccessTokenUc.MockIAccessTokenUsecase)
 	}{
 		{
-			name: "Success_service_returns_success",
-			req: entity.InsertPaymentRequest{
-				AccountID: 1,
-				Amount:    10000,
-				Currency:  "IDR",
+			name: "error binding request body",
+			args: args{
+				body: `invalid_json`, // Sending invalid raw JSON string
 			},
-			setup: func(svc *paymentsvcmock.IPaymentService) {
-				svc.On("Insert", ctx, entity.InsertPaymentRequest{
-					AccountID: 1,
-					Amount:    10000,
-					Currency:  "IDR",
-				}).Return(entity.InsertPaymentResponse{ID: 1}, nil).Once()
-			},
-			want:    entity.InsertPaymentResponse{ID: 1},
-			wantErr: nil,
+			wantCode: fiber.StatusInternalServerError,
 		},
 		{
-			name: "Failed_service_returns_validation_error",
-			req: entity.InsertPaymentRequest{
-				AccountID: 0,
-				Amount:    10000,
-				Currency:  "IDR",
+			name: "error validate request",
+			args: args{
+				// Sending the struct directly
+				body: entity.TokenGenerationRefreshRequest{
+					GrantType:    "invalid", // This will fail validation
+					RefreshToken: "TEST",
+				},
 			},
-			setup: func(svc *paymentsvcmock.IPaymentService) {
-				svc.On("Insert", ctx, entity.InsertPaymentRequest{
-					AccountID: 0,
-					Amount:    10000,
-					Currency:  "IDR",
-				}).Return(entity.InsertPaymentResponse{}, apierror.Get("0400").Message("account_id is required")).Once()
+			wantCode:     fiber.StatusBadRequest,
+			wantResponse: nil,
+		},
+		{
+			name: "error from usecase",
+			args: args{
+				body: entity.TokenGenerationRefreshRequest{
+					GrantType:    "refresh_token",
+					RefreshToken: "TEST",
+				},
 			},
-			want:    entity.InsertPaymentResponse{},
-			wantErr: apierror.Get("0400").Message("account_id is required"),
+			wantCode:     fiber.StatusInternalServerError,
+			wantResponse: nil,
+			setupMock: func(uc *mockAccessTokenUc.MockIAccessTokenUsecase) {
+				uc.EXPECT().RefreshAccessToken(mock.Anything, entity.TokenGenerationRefreshRequest{
+					GrantType:    "refresh_token",
+					RefreshToken: "TEST",
+				}).Return(entity.TokenGenerationRefreshResponse{}, errors.New("TEST")).Once()
+			},
+		},
+		{
+			name: "success refresh token",
+			args: args{
+				body: entity.TokenGenerationRefreshRequest{
+					GrantType:    "refresh_token",
+					RefreshToken: "TEST",
+				},
+			},
+			wantCode: fiber.StatusOK,
+			wantResponse: &entity.TokenGenerationRefreshResponse{
+				AccessToken:  "access_token",
+				RefreshToken: "refresh_token",
+			},
+			setupMock: func(uc *mockAccessTokenUc.MockIAccessTokenUsecase) {
+				uc.EXPECT().RefreshAccessToken(mock.Anything, entity.TokenGenerationRefreshRequest{
+					GrantType:    "refresh_token",
+					RefreshToken: "TEST",
+				}).Return(entity.TokenGenerationRefreshResponse{
+					AccessToken:  "access_token",
+					RefreshToken: "refresh_token",
+				}, nil).Once()
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := paymentsvcmock.NewIPaymentService(t)
-			tt.setup(mockSvc)
+			app := http.NewRouter(http.RouteConfig{DisableAuthChecker: true})
+			mockUc := mockAccessTokenUc.NewMockIAccessTokenUsecase(t)
 
-			// Execute service call directly (simulating what the handler does)
-			got, err := mockSvc.Insert(ctx, tt.req)
-
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.EqualError(t, err, tt.wantErr.Error())
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.want, got)
+			if tt.setupMock != nil {
+				tt.setupMock(mockUc)
 			}
 
-			mockSvc.AssertExpectations(t)
-		})
-	}
-}
+			apiToken := NewTokenApi(&stubtracer.StubTracer{}, mockUc)
+			app.Post("/ms/auth/v1/token/refresh", apiToken.RefreshToken)
 
-// TestApiPayment_AccountID_Logic tests pure handler field-derivation logic (no mocks needed).
-func TestApiPayment_AccountID_Logic(t *testing.T) {
-	tests := []struct {
-		name          string
-		headerID      int64
-		wantAccountID int64
-	}{
-		{
-			name:          "Use_account_id_from_header",
-			headerID:      42,
-			wantAccountID: 42,
-		},
-		{
-			name:          "Default_to_zero_when_header_missing",
-			headerID:      0,
-			wantAccountID: 0,
-		},
-	}
+			// Determine body content dynamically based on the type of tt.args.body
+			var reqBody *bytes.Buffer
+			if strBody, ok := tt.args.body.(string); ok {
+				// Raw string payload
+				reqBody = bytes.NewBuffer([]byte(strBody))
+			} else {
+				// Struct payload implicitly to be encoded into JSON
+				jsonBytes, err := json.Marshal(tt.args.body)
+				if err != nil {
+					t.Fatalf("Failed to marshal request body: %v", err)
+				}
+				reqBody = bytes.NewBuffer(jsonBytes)
+			}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate handler logic inline
-			accountID := tt.headerID
-			assert.Equal(t, tt.wantAccountID, accountID)
+			req := httptest.NewRequest("POST", "/ms/auth/v1/token/refresh", reqBody)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("Failed to execute request: %v", err)
+			}
+
+			if resp.StatusCode != tt.wantCode {
+				buf := make([]byte, 1024)
+				n, _ := resp.Body.Read(buf)
+				t.Errorf("ApiToken.RefreshToken() status code = %v, wantCode %v. Body: %s", resp.StatusCode, tt.wantCode, string(buf[:n]))
+			}
+
+			// Verify Response
+			if tt.wantResponse != nil {
+				buf := make([]byte, 2048)
+				n, _ := resp.Body.Read(buf)
+
+				// Typical successful response formatting check.
+				// By default, ego's basic ResponseSuccess maps to this wrapper format
+				var responseBody struct {
+					Data entity.TokenGenerationRefreshResponse `json:"data"`
+				}
+				// If the server directly returning un-wrapped JSON simply read from original type, but usually is wrapped into "data"
+				err := json.Unmarshal(buf[:n], &responseBody)
+				if err == nil && responseBody.Data.AccessToken != "" {
+					assert.Equal(t, *tt.wantResponse, responseBody.Data)
+				} else {
+					// Fallback to directly verifying against the struct without root node parsing in case ego changed wrapping structure
+					var unwrappedResponseBody entity.TokenGenerationRefreshResponse
+					err = json.Unmarshal(buf[:n], &unwrappedResponseBody)
+					if err != nil {
+						t.Fatalf("Failed to unmarshal test response body: %v. Raw Body: %s", err, string(buf[:n]))
+					}
+					assert.Equal(t, *tt.wantResponse, unwrappedResponseBody)
+				}
+			}
 		})
 	}
 }

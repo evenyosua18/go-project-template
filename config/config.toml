@@ -59,3 +59,14 @@ level = "debug"
 
 [cache]
 duration = ""
+
+[cache.redis]
+addr = ""
+password = ""
+db = 0
+username = ""
+
+[remote_config]
+provider = ""
+credentials = ""
+refresh_period = "1m"

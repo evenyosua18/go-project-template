@@ -38,6 +38,6 @@ For each interface dependency:
 ### 4 Coverage Verification
 Run tests and confirm ≥ 90% coverage:
 ```bash
-make test
+make coverage TYPE={db|usecase|public|service|entity} FOLDER={related folder}
 ```
 If below 90%, add additional test cases before finishing.

@@ -19,8 +19,8 @@ test:
 	@go test -failfast ./app/repository/db/* --cover
 	@echo "-- run usecase package unit test --"
 	@go test -failfast ./app/usecase/* --cover
-# 	@echo "-- run rest server package unit test --"
-# 	@go test -failfast ./app/server/rest/* --cover
+	@echo "-- run rest server package unit test --"
+	@go test -failfast ./app/server/rest/public/v1/api/* --cover
 
 # to run a specific test file
 # example: make test-file TYPE=db FOLDER=access_tokens FILE=authorize_test

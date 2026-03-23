@@ -17,9 +17,10 @@ Read `.agents/knowledges/unit_test.md` and `.agents/knowledges/architecture.md` 
 
 ### 2 Mock Generation
 For each interface dependency:
-- Run from `app/`:
+- add mock configuration at `.mockery.yaml`
+- Run:
   ```bash
-  cd app && mockery --name={InterfaceName} --dir={source/path} --output=mocks/{source/path}
+  mockery
   ```
 - Verify generated file at `app/mocks/{source/path}/mock_{InterfaceName}.go`
 - Do not hand-write or edit generated mock files
@@ -38,6 +39,6 @@ For each interface dependency:
 ### 4 Coverage Verification
 Run tests and confirm ≥ 90% coverage:
 ```bash
-make coverage TYPE={db|usecase|public|service|entity} FOLDER={related folder}
+make coverage TYPE={db|usecase|public|service|entity} FOLDER={related folder name}
 ```
 If below 90%, add additional test cases before finishing.
